@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSS Pattern Designer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+        .toolbar {
+            width: 50px;
+            background-color: #f0f0f0;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .toolbar button {
+            margin-bottom: 10px;
+            font-size: 24px;
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+        .canvas-container {
+            flex-grow: 1;
+            position: relative;
+            overflow: auto;
+        }
+        #canvas {
+            position: relative;
+            width: 1024px;
+            height: 1024px;
+            background-color: white;
+            background-size: 5px 5px, 5px 5px, contain;
+            background-image: 
+                linear-gradient(to right, rgba(224, 224, 224, 0.5) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(224, 224, 224, 0.5) 1px, transparent 1px);
+            background-position: top left, top left, center;
+            background-repeat: repeat, repeat, no-repeat;
+        }
+        .rectangle {
+            position: absolute;
+            border: 1px solid black;
+            cursor: move;
+            box-sizing: border-box;
+        }
+        .rectangle.selected {
+            border: 2px solid blue;
+        }
+        .resize-handle {
+            width: 10px;
+            height: 10px;
+            background-color: white;
+            border: 1px solid black;
+            position: absolute;
+            cursor: se-resize;
+        }
+        .code-panel {
+            width: 300px;
+            background-color: #f0f0f0;
+            padding: 10px;
+            overflow-y: auto;
+            display: flex;          
+            flex-direction: column; 
+            height: auto;
+        }
+        #copyBtn {
+            align-self: flex-start;
+        }
+        #cssCode {
+            resize: vertical;   
+            height: auto;        
+            min-height: 100px;    
+        }
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #f0f0f0;
+            padding: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <button id="uploadBtn" title="Upload Image">🖼️</button>
+        <button id="rectangleBtn" title="Add Rectangle">🔲</button>
+        <button id="clearBtn" title="Clear All">🚫</button>
+    </div>
+    <div class="canvas-container">
+        <div id="canvas"></div>
+    </div>
+    <div class="code-panel">
+        <button id="copyBtn" title="Copy to Clipboard">📋</button>
+        <textarea id="cssCode"></textarea>
+    </div>
+    <div class="status-bar" id="statusBar"></div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const cssCode = document.getElementById('cssCode');
+        const statusBar = document.getElementById('statusBar');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const rectangleBtn = document.getElementById('rectangleBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const clearBtn = document.getElementById('clearBtn');
+
+        let rectangles = [];
+        let selectedRectangle = null;
+        let isDragging = false;
+        let isResizing = false;
+        let resizeHandle = null;
+        let offsetX, offsetY;
+        let image_url = null;
+        let cur_mouse_x = 0;
+        let cur_mouse_y = 0;
+
+        function createRectangle(x, y) {
+            const rect = document.createElement('div');
+            rect.className = 'rectangle';
+            rect.style.left = x + 'px';
+            rect.style.top = y + 'px';
+            
+            const maxSide = Math.max(canvas.clientWidth, canvas.clientHeight);
+            const size = maxSide / 12;
+            rect.style.width = size + 'px';
+            rect.style.height = size + 'px';
+
+            const hue = Math.random() * 360;
+            rect.style.backgroundColor = `hsla(${hue}, 100%, 50%, 0.5)`;
+
+            rect.id = `rect${rectangles.length + 1}`;
+            rect.innerText = rect.id;
+            rect.style.fontSize = 10 + 'pt';
+            canvas.appendChild(rect);
+
+            rectangles.push(rect);
+            return rect;
+        }
+
+        function drawCanvas(img) {
+            if(img) {
+                canvas.style.width = img.width + 'px';
+                canvas.style.height = img.height + 'px';
+                canvas.style.backgroundImage = `
+                    linear-gradient(to right, rgba(224, 224, 224, 0.5) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(224, 224, 224, 0.5) 1px, transparent 1px),
+                    url(${img.src})
+                `;
+            } else {
+                console.log('draw canvas NO img');
+                canvas.style.height = canvas.style.width = 1024 + 'px';
+                canvas.style.backgroundImage = `
+                    linear-gradient(to right, rgba(224, 224, 224, 0.5) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(224, 224, 224, 0.5) 1px, transparent 1px)
+                `;
+            }
+            canvas.style.backgroundSize = '5px 5px, 5px 5px, contain';
+            canvas.style.backgroundPosition = 'top left, top left, center';
+            canvas.style.backgroundRepeat = 'repeat, repeat, no-repeat';
+        }
+
+        function clearCanvas() {
+            image_url = null;
+            rectangles.forEach(rect => canvas.removeChild(rect));
+            rectangles = []; // Clear the rectangles array 
+            cssCode.value = ''; 
+            selectRectangle(null);
+            updateCSSCode();
+            updateStatusBar();
+            drawCanvas(null);
+            saveAppState(); 
+        }
+
+        function addResizeHandles(rect) {
+            const positions = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
+            positions.forEach(pos => {
+                const handle = document.createElement('div');
+                handle.className = 'resize-handle';
+                handle.dataset.position = pos;
+                rect.appendChild(handle);
+                positionResizeHandle(handle, pos);
+            });
+        }
+
+        function positionResizeHandle(handle, position) {
+            const rect = handle.parentElement;
+            const rectWidth = rect.offsetWidth;
+            const rectHeight = rect.offsetHeight;
+
+            switch(position) {
+                case 'nw': 
+                    handle.style.left = '-5px'; 
+                    handle.style.top = '-5px'; 
+                    handle.style.cursor = 'nwse-resize';
+                    break;
+                case 'n': 
+                    handle.style.left = '50%'; 
+                    handle.style.top = '-5px'; 
+                    handle.style.transform = 'translateX(-50%)';
+                    handle.style.cursor = 'ns-resize';
+                    break;
+                case 'ne': 
+                    handle.style.right = '-5px'; 
+                    handle.style.top = '-5px';
+                    handle.style.cursor = 'nesw-resize';
+                    break;
+                case 'w': 
+                    handle.style.left = '-5px'; 
+                    handle.style.top = '50%'; 
+                    handle.style.transform = 'translateY(-50%)';
+                    handle.style.cursor = 'ew-resize';
+                    break;
+                case 'e': 
+                    handle.style.right = '-5px'; 
+                    handle.style.top = '50%'; 
+                    handle.style.transform = 'translateY(-50%)';
+                    handle.style.cursor = 'ew-resize';
+                    break;
+                case 'sw': 
+                    handle.style.left = '-5px'; 
+                    handle.style.bottom = '-5px';
+                    handle.style.cursor = 'nesw-resize';
+                    break;
+                case 's': 
+                    handle.style.left = '50%'; 
+                    handle.style.bottom = '-5px'; 
+                    handle.style.transform = 'translateX(-50%)';
+                    handle.style.cursor = 'ns-resize';
+                    break;
+                case 'se': 
+                    handle.style.right = '-5px'; 
+                    handle.style.bottom = '-5px';
+                    handle.style.cursor = 'nwse-resize';
+                    break;
+            }
+        }
+
+        function selectRectangle(rect) {
+            if (selectedRectangle) {
+                selectedRectangle.classList.remove('selected');
+                Array.from(selectedRectangle.getElementsByClassName('resize-handle')).forEach(handle => handle.remove());
+                // selectedRectangle.querySelector('#elementId').style.display = 'none';
+            }
+            if (rect) {
+                selectedRectangle = rect;
+                rect.classList.add('selected');
+                addResizeHandles(rect);
+                updateStatusBar();
+            } else {
+                selectedRectangle = null;
+                statusBar.textContent = '';
+            }
+        }
+
+        function updateCSSCode() {
+            let css = '';
+            rectangles.forEach(rect => {
+                css += `#${rect.id} {\n`;
+                css += `    position: absolute;\n`;
+                css += `    left: ${rect.offsetLeft}px;\n`;
+                css += `    top: ${rect.offsetTop}px;\n`;
+                css += `    width: ${rect.offsetWidth}px;\n`;
+                css += `    height: ${rect.offsetHeight}px;\n`;
+                css += `    background-color: ${rect.style.backgroundColor};\n`;
+                css += `}\n\n`;
+            });
+            cssCode.textContent = css;
+            cssCode.value = css;
+        }
+
+        function parseCSS(cssText) {
+            const styleRules = [];
+            const blocks = cssText.match(/[^}]+(?=})/g); // Split into style blocks
+
+            if (blocks) {
+                blocks.forEach(block => {
+                    const [selector, stylesRaw] = block.trim().split('{');
+                    const styles = {};
+                    stylesRaw.split(';').forEach(style => {
+                        if (style.trim() !== "") {
+                        const [property, value] = style.split(':').map(s => s.trim());
+                        styles[property] = value;
+                        }
+                    });
+                    styleRules.push({ selector, styles });
+                });
+            }
+
+            return styleRules;
+        }
+
+        function applyCSSFromPanel() {
+            const cssText = cssCode.value; 
+            const styleRules = parseCSS(cssText);
+            renamed_selectors = [];
+            found_selectors = [];
+            const orphans = [];
+
+            styleRules.forEach(rule => {
+                const rect_id = rule.selector.trim().replace('#', '');
+                const rect = document.getElementById(rect_id);
+                if (rect) {
+                    console.log('found rect id', rect.id);
+                    found_selectors.push(rect_id);
+                    Object.assign(rect.style, rule.styles);
+                } else {
+                    renamed_selectors.push(rule);
+                }
+            });
+
+            document.querySelectorAll('.rectangle').forEach(rect => {
+                if (!found_selectors.includes(rect.id)) {
+                    orphans.push(rect);
+                }
+            });
+            const existRects = renamed_selectors.slice(0, orphans.length);
+                existRects.forEach((rule, index) => {
+                    rect = orphans[index];
+                    Object.assign(rect.style, rule.styles);
+                    rect.id = rule.selector.trim().replace('#', '');
+                    rect.innerText = rect.id;
+                });
+            if (renamed_selectors.length >= orphans.length) {
+                const newRects = renamed_selectors.slice(orphans.length);
+                newRects.forEach(rule => {
+                    newRect = createRectangle(rule.offsetLeft, rule.offsetTop);
+                    Object.assign(newRect.style, rule.styles);
+                    newRect.id = rule.selector.trim().replace('#', '');;
+                    newRect.innerText = newRect.id;
+                });
+            } else if (orphans.length > renamed_selectors.length) {
+                const surplus = orphans.slice(renamed_selectors.length);
+                    surplus.forEach(rect => {
+                        canvas.removeChild(rect);
+                        rect.remove();
+                        rectangles.pop(rect);
+                    });
+            }
+
+            saveAppState();
+        }
+
+        function updateStatusBar() {
+            statusBar.textContent = `${cur_mouse_x},${cur_mouse_y} | `;
+            if (selectedRectangle) {
+                statusBar.textContent += `${selectedRectangle.id}: x=${selectedRectangle.offsetLeft}, y=${selectedRectangle.offsetTop}, width=${selectedRectangle.offsetWidth}, height=${selectedRectangle.offsetHeight}`;
+            }
+        }
+
+        function saveAppState() {
+            const state = {
+                cssCode: cssCode.value,
+                imageUrl: image_url, // Extract URL from background-image
+            };
+            localStorage.setItem('appState', JSON.stringify(state));
+        }
+
+        function loadAppState() {
+            const savedState = JSON.parse(localStorage.getItem('appState'));
+
+            if (savedState) {
+                cssCode.value = savedState.cssCode;
+                applyCSSFromPanel(); 
+
+                if (savedState.imageUrl) {
+                    const img = new Image();
+                    img.src = savedState.imageUrl;
+                    drawCanvas(img);
+                    image_url = structuredClone(savedState.imageUrl);
+                }
+            }
+
+            saveAppState();
+        }
+
+        window.addEventListener('load', loadAppState);
+
+        canvas.addEventListener('mousedown', (e) => {
+            const clickedRect = e.target.closest('.rectangle');
+
+            if (clickedRect) {
+                original_width = parseFloat(getComputedStyle(clickedRect, null).getPropertyValue('width').replace('px', ''));
+                original_height = parseFloat(getComputedStyle(clickedRect, null).getPropertyValue('height').replace('px', ''));
+                original_x = clickedRect.getBoundingClientRect().left;
+                original_y = clickedRect.getBoundingClientRect().top;
+                original_mouse_x = e.pageX;
+                original_mouse_y = e.pageY;
+
+                if (e.target.classList.contains('resize-handle')) {
+                    isResizing = true;
+                    resizeHandle = e.target;
+                    e.preventDefault(); // Prevent text selection
+                } else {
+                    const clickedRects = rectangles.filter(rect => {
+                        const rectBounds = rect.getBoundingClientRect();
+                        return e.clientX >= rectBounds.left && e.clientX <= rectBounds.right &&
+                               e.clientY >= rectBounds.top && e.clientY <= rectBounds.bottom;
+                    });
+                    let nextRectIndex = clickedRects.indexOf(selectedRectangle) + 1;
+                    if (nextRectIndex >= clickedRects.length) nextRectIndex = 0;
+                    selectRectangle(clickedRects[nextRectIndex]);
+                    isDragging = true;
+                    offsetX = e.clientX - clickedRects[nextRectIndex].offsetLeft;
+                    offsetY = e.clientY - clickedRects[nextRectIndex].offsetTop;
+                }
+            } else {
+                selectRectangle(null);
+                cssCode.blur();
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            cur_mouse_x = e.pageX;
+            cur_mouse_y = e.pageY;
+            updateStatusBar();
+            if (isDragging && selectedRectangle) {
+                selectedRectangle.style.left = (e.clientX - offsetX) + 'px';
+                selectedRectangle.style.top = (e.clientY - offsetY) + 'px';
+                updateCSSCode();
+                updateStatusBar();
+            } else if (isResizing && selectedRectangle && resizeHandle) {
+
+                const rect = selectedRectangle.getBoundingClientRect();
+                const canvasRect = canvas.getBoundingClientRect();
+                const position = resizeHandle.dataset.position;
+
+                if (position.includes('w')) {
+                    const newLeft = e.clientX - canvasRect.left;
+                    selectedRectangle.style.left = newLeft + 'px';
+                    const newWidth = Math.max(10, original_width - (e.pageX - original_mouse_x));
+                    selectedRectangle.style.width = newWidth + 'px';
+
+                } else if (position.includes('e')) {
+                    const newWidth = Math.max(10, e.clientX - rect.left);
+                    selectedRectangle.style.width = newWidth + 'px';
+                }
+
+                if (position.includes('n')) {
+                    const newTop = e.clientY - canvasRect.top;
+                    selectedRectangle.style.top = newTop + 'px';
+                    const newHeight = Math.max(10, original_height - (e.pageY - original_mouse_y));
+                    selectedRectangle.style.height = newHeight + 'px';
+                } else if (position.includes('s')) {
+                    const newHeight = Math.max(10, e.clientY - rect.top);
+                    selectedRectangle.style.height = newHeight + 'px';
+                }
+
+                Array.from(selectedRectangle.getElementsByClassName('resize-handle')).forEach(handle => {
+                    positionResizeHandle(handle, handle.dataset.position);
+                });
+
+                updateCSSCode();
+                updateStatusBar();
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            isResizing = false;
+            resizeHandle = null;
+            updateCSSCode();
+            saveAppState();
+        });
+
+
+        rectangleBtn.addEventListener('mousedown', (e) => {
+            const rect = createRectangle(0, 0);
+            selectRectangle(rect);
+            isDragging = true;
+            offsetX = rect.offsetWidth / 2;
+            offsetY = rect.offsetHeight / 2;
+            updateCSSCode();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging && selectedRectangle && e.target === rectangleBtn) {
+                selectedRectangle.style.left = (e.clientX - canvas.offsetLeft - offsetX) + 'px';
+                selectedRectangle.style.top = (e.clientY - canvas.offsetTop - offsetY) + 'px';
+                updateCSSCode();
+                updateStatusBar();
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (selectedRectangle) {
+                if (e.key.startsWith('Arrow')) {
+                   e.preventDefault(); // Prevent default arrow key behavior for scrolling
+                }
+                const step = 1; // 1 pixel movement
+                switch (e.key) {
+                    case 'Delete': 
+                        canvas.removeChild(selectedRectangle);
+                        rectangles = rectangles.filter(rect => rect !== selectedRectangle);
+                        selectRectangle(null);
+                        updateCSSCode();
+                        break;
+                    case 'ArrowUp':
+                        if(!e.shiftKey) {
+                            console.log('no shift key')
+                            selectedRectangle.style.top = (selectedRectangle.offsetTop - step) + 'px';
+                        } else {
+                            console.log('have shift key')
+                            selectedRectangle.style.top = selectedRectangle.offsetTop - 1 + 'px';
+                            selectedRectangle.style.height = selectedRectangle.offsetHeight + 1 + 'px';
+                        }
+                        break;
+                    case 'ArrowDown':
+                        if(!e.shiftKey) {
+                            selectedRectangle.style.top = (selectedRectangle.offsetTop + step) + 'px';
+                        } else {
+                            selectedRectangle.style.height = selectedRectangle.offsetHeight + 1 + 'px';
+                        }
+                        break;
+                    case 'ArrowLeft':
+                        if(!e.shiftKey) {
+                            selectedRectangle.style.left = (selectedRectangle.offsetLeft - step) + 'px';
+                        } else {
+                            selectedRectangle.style.left = selectedRectangle.offsetLeft - 1 + 'px';
+                            selectedRectangle.style.width = selectedRectangle.offsetWidth + 1 + 'px';
+                        }
+                        break;
+                    case 'ArrowRight':
+                        if(!e.shiftKey) {
+                            selectedRectangle.style.left = (selectedRectangle.offsetLeft + step) + 'px';
+                        } else {
+                            selectedRectangle.style.width = selectedRectangle.offsetWidth + 1 + 'px';
+                        }
+                        break;
+                }
+                updateCSSCode(); // Update the CSS code after moving
+                updateStatusBar(); // Update the status bar as well
+                saveAppState();
+            }
+        });
+
+        uploadBtn.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        image_url = structuredClone(event.target.result);
+                        drawCanvas(img);
+                        console.log('before save app state when upload', image_url ? image_url.slice(0, 100): 'No image');
+                        saveAppState();
+                    }
+                };
+                reader.readAsDataURL(file);
+            };
+            input.click();
+        });
+
+        clearBtn.addEventListener('click', clearCanvas);
+
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(cssCode.textContent);
+        });
+
+        cssCode.addEventListener('input', () => {
+            applyCSSFromPanel();
+        });
+    </script>
+</body>
+</html>
