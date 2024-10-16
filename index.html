@@ -129,8 +129,7 @@
             rect.style.left = x + 'px';
             rect.style.top = y + 'px';
             
-            const maxSide = Math.max(canvas.clientWidth, canvas.clientHeight);
-            const size = maxSide / 12;
+            const size = 100;
             rect.style.width = size + 'px';
             rect.style.height = size + 'px';
 
@@ -148,8 +147,8 @@
 
         function drawCanvas(img) {
             if(img) {
-                canvas.style.width = img.width + 'px';
-                canvas.style.height = img.height + 'px';
+                canvas.width = img.width;
+                canvas.height = img.height;
                 canvas.style.backgroundImage = `
                     linear-gradient(to right, rgba(224, 224, 224, 0.5) 1px, transparent 1px),
                     linear-gradient(to bottom, rgba(224, 224, 224, 0.5) 1px, transparent 1px),
@@ -157,14 +156,15 @@
                 `;
             } else {
                 console.log('draw canvas NO img');
-                canvas.style.height = canvas.style.width = 1024 + 'px';
+                canvas.width = 1024;
+                canvas.height = 1024; 
                 canvas.style.backgroundImage = `
                     linear-gradient(to right, rgba(224, 224, 224, 0.5) 1px, transparent 1px),
                     linear-gradient(to bottom, rgba(224, 224, 224, 0.5) 1px, transparent 1px)
                 `;
             }
             canvas.style.backgroundSize = '5px 5px, 5px 5px, contain';
-            canvas.style.backgroundPosition = 'top left, top left, center';
+            canvas.style.backgroundPosition = 'top left, top left, top left';
             canvas.style.backgroundRepeat = 'repeat, repeat, no-repeat';
         }
 
@@ -253,6 +253,12 @@
             if (rect) {
                 selectedRectangle = rect;
                 rect.classList.add('selected');
+                const allRectangles = document.querySelectorAll('.rectangle');
+                allRectangles.forEach((r, index) => {
+                    r.style.zIndex = index;
+                });
+                rect.style.zIndex = allRectangles.length;
+                console.log('selected ', rect.id, rect.style.zIndex);
                 addResizeHandles(rect);
                 updateStatusBar();
             } else {
@@ -354,6 +360,7 @@
             if (selectedRectangle) {
                 statusBar.textContent += `${selectedRectangle.id}: x=${selectedRectangle.offsetLeft}, y=${selectedRectangle.offsetTop}, width=${selectedRectangle.offsetWidth}, height=${selectedRectangle.offsetHeight}`;
             }
+            statusBar.textContent += ` | ${parseInt(canvas.width)},${parseInt(canvas.height)}`;
         }
 
         function saveAppState() {
